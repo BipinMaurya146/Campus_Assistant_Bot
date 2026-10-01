@@ -5,6 +5,13 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 
+from backend.app.general_conversation import (
+    handle_general_conversation,
+    normalize_text,
+    detect_general_intent,
+    get_general_response,
+)
+
 INTENT_THRESHOLD = 0.65
 ANSWER_THRESHOLD = 0.60
 DEFAULT_FALLBACK = "Sorry, I don't have an answer for this question."
@@ -66,7 +73,25 @@ class IntentClassifier:
         self._is_loaded = True
 
     def predict(self, user_question: str) -> dict:
-        """Predict intent, compute dataset question similarity, apply dual thresholds, and return answer."""
+        """Process user question through the response pipeline:
+        
+        Priority 1: Check manual general conversation layer (greetings, small talk, etc.).
+                    If matched, returns immediately without triggering ML search or fallback.
+        Priority 2: Pre-computed Intent Prototype matching via SentenceTransformer embeddings.
+        Priority 3: Filtered dataset question cosine similarity search.
+        Priority 4: Dual threshold verification (Intent >= 0.65, Similarity >= 0.60).
+        Priority 5: Fallback response if confidence is below threshold.
+        """
+        # =====================================================================
+        # Step 1: Manual General Conversation Layer (Priority 1)
+        # =====================================================================
+        general_match = handle_general_conversation(user_question)
+        if general_match is not None:
+            return general_match
+
+        # =====================================================================
+        # Step 2: ML Model & Dataset Retrieval (Priority 2 & 3)
+        # =====================================================================
         if not self._is_loaded:
             self.load_resources()
 
@@ -151,9 +176,28 @@ class IntentClassifier:
             "response": matched_response
         }
 
+    def chatbot(self, user_question: str) -> dict:
+        """Alias to predict method following the full priority pipeline."""
+        return self.predict(user_question)
+
 
 # Global classifier instance
 classifier = IntentClassifier()
+
+
+def chatbot(user_question: str) -> dict:
+    """Main chatbot pipeline entrypoint.
+    
+    Priority Flow:
+    1. USER INPUT -> normalize_text(user_question)
+    2. Check manual general conversation layer (detect_general_intent / get_general_response)
+    3. If general conversation matched -> return predefined friendly response
+    4. Otherwise, run Intent Prototype matching and Dataset question similarity search
+    5. If similarity threshold met -> return exact dataset answer
+    6. If no match -> return default fallback: "Sorry, I don't have an answer for this question."
+    """
+    return classifier.predict(user_question)
+
 
 
 
